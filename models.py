@@ -7,7 +7,40 @@ from torchtext.vocab import Vectors, GloVe
 from namedtensor import ntorch, NamedTensor
 from namedtensor.text import NamedField
 import random
+import copy
 
+class LatentVariableMixtureModel(ntorch.nn.Module):
+    def __init__(self, model, experts, variational):
+        super().__init__()
+        try:
+            self.models = []
+            for _ in range(experts):
+                self.models.append(copy.deepcopy(model))
+        except RuntimeError:
+            raise RuntimeError("model must be newly instantiated")
+        self.experts = experts
+        self.variational = variational
+
+    def forward(self, premise, hypothesis):
+        if self.variational:
+            return self.sample(premise, hypothesis)
+        else:
+            return self.enumerate(premise, hypothesis)
+
+    def self.sample(premise, hypothesis):
+        pass
+
+    def enumerate(self, premise, hypothesis):
+        predictions = []
+        for model in self.models:
+            predictions.append(model(premise, hypothesis))
+        return (
+            ntorch.stack(predictions, "experts")
+            .softmax('logit')
+            .mean('experts')
+            .log()
+            .rename('logit','logprob')
+        )
 class AttentionModel(ntorch.nn.Module):
     def __init__(self,
                  TEXT, LABEL,
