@@ -11,7 +11,8 @@ import random
 def load(device = 'cpu',
               pretrained_embedding = 'glove.6B.300d',
               embedding_dim = 300,
-              embedding_num = 100):
+              embedding_num = 100,
+              batch_size = 16):
     # Our input $x$
     TEXT = NamedField(names=('seqlen',))
 
@@ -27,7 +28,7 @@ def load(device = 'cpu',
 
     # create iters
     train_iter, val_iter = torchtext.data.BucketIterator.splits(
-    (train, val), batch_size=16, device=torch.device(device), repeat=False)
+    (train, val), batch_size=batch_size, device=torch.device(device), repeat=False)
 
     test_iter = torchtext.data.BucketIterator(test, train=False, batch_size=10, device=torch.device(device))
 
