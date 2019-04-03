@@ -66,7 +66,13 @@ class AttentionModel(ntorch.nn.Module):
         # initialize intra attn
         self.intra_attn = intra_attn
         if self.intra_attn:
-            self.feedforward_intra_attn = self.intra_attn_layer()
+            distance_bias = (
+                torch.distributions.normal.Normal(0, 0.01)
+                .sample(sample_shape=torch.Size([11]))
+            )
+            self.distance_bias = NamedTensor(distance_bias, names='bias')
+            self.register_parameter("distance_bias", self.distance_bias)
+            self.feedforward_intra_attn = MLP(emb_dim, emb_dim,'embedding', 'hidden', self.dropout)
             emb_dim = 2*emb_dim
 
         # initialize feedforward modules
@@ -81,12 +87,12 @@ class AttentionModel(ntorch.nn.Module):
         hypothesis = self.embedding(hypothesis)
         hypothesis = self.embedding_projection(hypothesis).rename('seqlen', 'seqlenHypo')
 
+        if self.intra_attn:
+            premise = self.intra_attn_layer(premise, 'seqlenPremise')
+            hypothesis = self.intra_attn_layer(hypothesis, 'seqlenHypo')
+
         premise_mask = (premise != 0).float()
         hypothesis_mask = (hypothesis != 0).float()
-
-        if self.intra_attn:
-            premise = self.feedforward_intra_attn(premise)
-            hypothesis = self.feedforward_intra_attn(hypothesis)
 
         #attend
         premise_hidden = self.feedforward_attn(premise)
@@ -111,29 +117,37 @@ class AttentionModel(ntorch.nn.Module):
         return agg
 
     def intra_attn_layer(self, x, seqlen_dimname):
-        ## TODO: not sure about distance bias term
-
         temp_dim = seqlen_dimname+'temp'
-        x_hidden1 = self.feedforward_intra_attn(x).relu()
-        x_hidden1 = self.dropout(x_hidden1)
+        x_hidden1 = self.feedforward_intra_attn(x)
         x_hidden2 = x_hidden1.rename(seqlen_dimname, temp_dim)
         intra_attn = x_hidden1.dot('hidden', x_hidden2).softmax(temp_dim)
+        self.intra_attn = intra_attn + self.get_distance_bias_matrix(
+            intra_attn.shape[seqlen_dimname],
+            seqlen_dimname,
+            temp_dim
+        )
         x_aligned = intra_attn.dot(temp_dim, x)
-
-        # save attention distribution
-        if seqlen_dimname == "seqlenPremise":
-            self.intra_attn_premise = intra_attn
-        else:
-            self.intra_attn_hypo = intra_attn
-
         return ntorch.cat([x, x_aligned], 'embedding')
+
+    def get_distance_bias_matrix(self, dim, name1, name2):
+        if dim > 10:
+            vec = torch.zeros(dim)
+            vec[:10] = self.distance_bias.values[:10]
+            vec[10:] = torch.zeros(vec[11:].shape[0]+1).fill_(self.distance_bias.values[10])
+        else:
+            vec = self.distance_bias.values[:dim]
+        distance_bias_matrix = torch.zeros(dim, dim)
+        for row in range(dim):
+            distance_bias_matrix[row,row:] = vec[0:dim-row]
+        distance_bias_matrix = distance_bias_matrix+distance_bias_matrix.transpose(0,1)
+        return NamedTensor(distance_bias_matrix.to(self.device), names = (name1, name2))
 
     def fit(self, train_iter, val_iter=[], lr=1e-2, verbose=True,
             batch_size=128, epochs=10, interval=1, early_stopping=False):
         self.to(self.device)
         lr = torch.tensor(lr)
         criterion = torch.nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adagrad(self.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         train_iter.batch_size = batch_size
 
         for epoch in range(epochs):  # loop over the dataset multiple times
