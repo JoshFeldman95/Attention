@@ -26,8 +26,11 @@ def load(device = 'cpu',
     LABEL.build_vocab(train)
 
     # create iters
-    train_iter, val_iter, test_iter = torchtext.data.BucketIterator.splits(
-    (train, val, test), batch_size=16, device=torch.device(device), repeat=False)
+    train_iter, val_iter = torchtext.data.BucketIterator.splits(
+    (train, val), batch_size=16, device=torch.device(device), repeat=False)
+
+    test_iter = torchtext.data.BucketIterator(test, train=False, batch_size=10, device=torch.device(device))
+
 
     # Build the vocabulary with word embeddings
     # Out-of-vocabulary (OOV) words are hashed to one of 100 random embeddings each
